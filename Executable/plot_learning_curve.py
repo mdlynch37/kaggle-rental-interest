@@ -67,31 +67,32 @@ def plot_learning_curve(estimator, X, y, ylim=None, cv=None, scoring=None,
     n_jobs : integer, optional
         Number of jobs to run in parallel (default 1).
     """
-    plt.figure()
+    fig, ax = plt.subplots()
+
     if ylim is not None:
         plt.ylim(*ylim)
-    plt.xlabel("Training examples")
-    plt.ylabel("Score")
+    ax.set_xlabel("Training examples")
+    ax.set_ylabel("Score")
     train_sizes, train_scores, test_scores = learning_curve(
-        estimator, X, y, cv=cv, scoring=scoring, n_jobs=n_jobs, train_sizes=train_sizes)
+        estimator, X, y, cv=cv, scoring=scoring, n_jobs=n_jobs,
+        train_sizes=train_sizes)
     train_scores_mean = np.mean(train_scores, axis=1)
     train_scores_std = np.std(train_scores, axis=1)
     test_scores_mean = np.mean(test_scores, axis=1)
     test_scores_std = np.std(test_scores, axis=1)
-    plt.grid()
 
-    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+    ax.fill_between(train_sizes, train_scores_mean - train_scores_std,
                      train_scores_mean + train_scores_std, alpha=0.1,
                      color="r")
-    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
-                     test_scores_mean + test_scores_std, alpha=0.1, color="g")
-    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
+    ax.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                    test_scores_mean + test_scores_std, alpha=0.1, color="g")
+    ax.plot(train_sizes, train_scores_mean, 'o-', color="r",
              label="Training score")
-    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
+    ax.plot(train_sizes, test_scores_mean, 'o-', color="g",
              label="Cross-validation score")
 
-    plt.legend(loc="best")
-    return plt
+    ax.legend(loc="best")
+    return ax
 
 
 if __name__=='__main__':
