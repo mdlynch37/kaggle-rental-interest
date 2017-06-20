@@ -5,12 +5,13 @@ we test preprocessing functions.
 """
 
 import pandas as pd
-from pandas.util.testing import assert_series_equal
+from pandas.util.testing import assert_series_equal, assert_dataframe_equal
 from numpy.testing import assert_array_equal
+import numpy as np
 
-from preprocessing import exp_int, AggTotalExtractor
+from preprocessing import exp_int, GroupSumExtractor
 
-class TestRentalInterest(object):
+class TestRentalInterest:
 
     def test_bayes_prior_exp_interest(self):
         man_ids = ['a', 'a', 'a', 'b', 'b', 'c']
@@ -29,22 +30,88 @@ class TestRentalInterest(object):
 
         assert_series_equal(exp_int1, exp_int2, check_names=False)
 
-class TestAggTotalExtractor(object):
+class TestGroupSumExtractor:
 
     def test_fit_transform(self):
         train = pd.Series(['a', 'a', 'a', 'b', 'b', 'c'], name='col')
 
-        fitted = AggTotalExtractor().fit(train)
+        fitted = GroupSumExtractor(normalize=False).fit(train)
+        expected = np.array([3, 3, 3, 2, 2, 1]).reshape(-1, 1)
         result = fitted.transform(train)
-        expected = pd.Series([3, 3, 3, 2, 2, 1], name='col').values.reshape(-1, 1)
         assert_array_equal(result, expected)
-        # assert_series_equal(result, expected)
 
-        test = pd.Series(['a', 'a', 'b', 'c', 'd'], name='col')
+        test = pd.Series(['a', 'a', 'd'], name='col')
+        expected = np.array([5, 5, 1]).reshape(-1, 1)
+
         result = fitted.transform(test)
-        expected = pd.Series([5, 5, 3, 2, 1], name='col').values.reshape(-1, 1)
         assert_array_equal(result, expected)
-        # assert_series_equal(result, expected)
+
+    def test_fit_transform_normed(self):
+        train = pd.Series(['a', 'a', 'a', 'b', 'b', 'c'], name='col')
+        fitted = GroupSumExtractor(normalize=True).fit(train)
+        fitted_size = len(train)
+        cnts1 = dict(a=3, b=2, c=1)
+        arr = np.array([3, 3, 3, 2, 2, 1])
+
+        normed = arr/fitted_size
+        expected = normed.reshape(-1, 1)
+
+        result = fitted.transform(train)
+        assert_array_equal(result, expected)
+
+        test = pd.Series(['a', 'a', 'd'], name='col')
+        total_size = fitted_size + len(test)
+        cnts2 = dict(a=2, d=1)
+        cnts_tot = dict(a=3+2, b=2, c=1, d=1)
+        arr2 = np.array([5, 5, 1])
+        normed = arr2/total_size
+        expected = normed.reshape(-1, 1)
+
+        result = fitted.transform(test)
+        assert_array_equal(result, expected)
+
+class TestAverageInterestExtractor:
+
+    def test_fit_transform(self):
+        data = dict(
+            manager_id='abbccc',
+            interest_level=[3, 1, 3, 2, 2, 3]
+        )
+        train_listings = pd.DataFrame(data)
+        fitted = AverageInterestExtractor().fit(train_listings)
+
+        a_sum, a_num = 3, 1
+        a_avg = a_sum / a_num
+
+        b_sum, b_num = (1+3), 2
+        b_avg = b_sum / b_num
+
+        c_sum, c_num = (2+2+4), 3
+        c_avg = c_sum / c_num
+
+        exp_data = dict(
+            manager_id='abbccc',
+            avg_interest=[a_avg, b_avg, b_avg, c_avg, c_avg, c_avg]
+        )
+        expected = pd.DataFrame(exp_data)
+        result = fitted.transform(train_listings)
+
+        assert_dataframe_equal(result, expected)
+
+        data = dict(
+            manager_id='bbbce',
+            interest_level=[1, 2, 2, 2, 1]
+        )
+        test_listings = pd.DataFrame(data)
+
+        exp_data = dict(
+            manager_id='bbbce',
+            avg_interest=[b_avg, b_avg, b_avg, c_avg, np.nan]
+        )
+        expected = pd.DataFrame(exp_data)
+        result = fitted.transform(train)
+
+        assert_dataframe_equal(result, expected)
 
 
 

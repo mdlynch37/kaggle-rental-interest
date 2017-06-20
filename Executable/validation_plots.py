@@ -1,28 +1,23 @@
 """
-========================
-Plotting Learning Curves
-========================
-
-On the left side the learning curve of a naive Bayes classifier is shown for
-the digits dataset. Note that the training score and the cross-validation score
-are both not very good at the end. However, the shape of the curve can be found
-in more complex datasets very often: the training score is very high at the
-beginning and decreases and the cross-validation score is very low at the
-beginning and increases. On the right side we see the learning curve of an SVM
-with RBF kernel. We can see clearly that the training score is still around
-the maximum and the validation score could be increased with more training
-samples.
+Sources:
 http://scikit-learn.org/stable/auto_examples/model_selection/plot_learning_curve.html
+
+
 """
-# print(__doc__)
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.naive_bayes import GaussianNB
-from sklearn.svm import SVC
-from sklearn.datasets import load_digits
-from sklearn.model_selection import learning_curve
+from sklearn.model_selection import learning_curve, validation_curve
 from sklearn.model_selection import ShuffleSplit
+
+
+def best_grid_results(grid):
+    results = []
+    results.append('Best score: {:.5f}\n'.format(grid.best_score_))
+    results.append('*** For parameters: ***')
+    for param, val in grid.best_params_.items():
+        results.append('{}: {}'.format(param, val))
+    return '\n'.join(results)
 
 
 def plot_learning_curve(estimator, X, y, ylim=None, cv=None, scoring=None,
@@ -32,7 +27,7 @@ def plot_learning_curve(estimator, X, y, ylim=None, cv=None, scoring=None,
 
     Parameters
     ----------
-    estimator : object type that implements the "fit" and "predict" methods
+    estimator : object type that implements the 'fit' and 'predict' methods
         An object of that type which is cloned for each validation.
 
     title : string
@@ -70,9 +65,9 @@ def plot_learning_curve(estimator, X, y, ylim=None, cv=None, scoring=None,
     fig, ax = plt.subplots()
 
     if ylim is not None:
-        plt.ylim(*ylim)
-    ax.set_xlabel("Training examples")
-    ax.set_ylabel("Score")
+        ax.set_ylim(*ylim)
+    ax.set_xlabel('Training examples')
+    ax.set_ylabel('Score')
     train_sizes, train_scores, test_scores = learning_curve(
         estimator, X, y, cv=cv, scoring=scoring, n_jobs=n_jobs,
         train_sizes=train_sizes)
@@ -83,34 +78,63 @@ def plot_learning_curve(estimator, X, y, ylim=None, cv=None, scoring=None,
 
     ax.fill_between(train_sizes, train_scores_mean - train_scores_std,
                      train_scores_mean + train_scores_std, alpha=0.1,
-                     color="r")
+                     color='r')
     ax.fill_between(train_sizes, test_scores_mean - test_scores_std,
-                    test_scores_mean + test_scores_std, alpha=0.1, color="g")
-    ax.plot(train_sizes, train_scores_mean, 'o-', color="r",
-             label="Training score")
-    ax.plot(train_sizes, test_scores_mean, 'o-', color="g",
-             label="Cross-validation score")
+                    test_scores_mean + test_scores_std, alpha=0.1, color='g')
+    ax.plot(train_sizes, train_scores_mean, 'o-', color='r',
+             label='Training score')
+    ax.plot(train_sizes, test_scores_mean, 'o-', color='g',
+             label='Cross-validation score')
 
-    ax.legend(loc="best")
+    ax.legend(loc='best')
     return ax
 
 
-if __name__=='__main__':
-    digits = load_digits()
-    X, y = digits.data, digits.target
+def plot_validation_curve(estimator, X, y, param_name, param_range,
+                          cv=None, scoring='accuracy', n_jobs=1):
+    """Plots vaildation curve for given hyperparamters.
+
+    Parameters
+    ----------
+    estimator : sklearn Classifier
+    param_name :  str
+    param_range : iterable
+    kwargs : passed to matplotlib plot
+
+    Returns
+    -------
+    plt : matplotlib plot
+    """
+    fig, ax = plt.subplots()
+
+    train_scores, valid_scores = validation_curve(
+        estimator, X, y, param_name=param_name, param_range=param_range,
+        cv=cv, scoring=scoring, n_jobs=n_jobs)
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    valid_scores_mean = np.mean(valid_scores, axis=1)
+    valid_scores_std = np.std(valid_scores, axis=1)
 
 
-    # Cross validation with 100 iterations to get smoother mean test and train
-    # score curves, each time with 20% data randomly selected as a validation set.
-    cv = ShuffleSplit(n_splits=100, test_size=0.2, random_state=0)
+    ax.set_title('Validation Curve with {}'.format(type(estimator).__name__))
+    ax.set_xlabel(param_name)
+    ax.set_ylabel('Score')
 
-    estimator = GaussianNB()
-    plot_learning_curve(estimator, X, y, ylim=(0.7, 1.01), cv=cv, n_jobs=4)
+    lw = 2
 
-    title = "Learning Curves (SVM, RBF kernel, $\gamma=0.001$)"
-    # SVC is more expensive so we do a lower number of CV iterations:
-    cv = ShuffleSplit(n_splits=10, test_size=0.2, random_state=0)
-    estimator = SVC(gamma=0.001)
-    plot_learning_curve(estimator, title, X, y, (0.7, 1.01), cv=cv, n_jobs=4)
+    ax.plot(param_range, train_scores_mean, label='Training score',
+            color='darkorange', lw=lw)
+    ax.fill_between(param_range, train_scores_mean - train_scores_std,
+                    train_scores_mean + train_scores_std, alpha=0.2,
+                    color='darkorange', lw=lw)
 
-    plt.show()
+    ax.plot(param_range, valid_scores_mean, label='Cross-validation score',
+            color='navy', lw=lw)
+    ax.fill_between(param_range, valid_scores_mean - valid_scores_std,
+                    valid_scores_mean + valid_scores_std, alpha=0.2,
+                    color='navy', lw=lw)
+
+    ax.legend(loc='best')
+
+    return ax

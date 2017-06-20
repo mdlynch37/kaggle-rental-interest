@@ -47,6 +47,7 @@ TEST_DIR = '../Tests/'
 TRAIN_FP = ''.join([DAT_DIR, 'train.json'])
 TEST_FP = ''.join([DAT_DIR, 'test.json'])
 SAMPLE_FP = ''.join([DAT_DIR, 'sample_submission.csv'])
+DF_TRAIN_PKL = ''.join([DAT_DIR, 'df_train.pkl'])
 
 scorer_acc = make_scorer(accuracy_score)
 
@@ -91,7 +92,7 @@ def make_boolean_cols(df):
     return df
 
 
-df = read_rental_interest(TRAIN_FP)
+df = read_rental_interest(DF_TRAIN_PKL, read_pkl=True)
 
 X, y = df.drop('interest_level', axis=1), df.interest_level
 

@@ -4,14 +4,20 @@ import seaborn as sns
 import numpy as np
 from scipy import stats
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from main import read_rental_interest
 
-
+# TODO: Add support for unordered x values
+# TODO: Add more detailed message for value out of bins exception
+# TODO: consider warning instead of exception
 def plot_prob_x_for_hue(x, data, hue,
                         bins=None, hue_bins=None, chi2_msg=True,
                         exp_xlabels=False, palette=None, ax=None,
                         **kwargs):
+
+    """Show both distribution and impact. Dist only if bins are evenly
+    spaced."""
 
     def chi2_p_val(obs_col, types_col, df):
         obs = (df.groupby(types_col)[obs_col]
@@ -37,12 +43,18 @@ def plot_prob_x_for_hue(x, data, hue,
 
     if bins is not None:
         data = data.copy()
-        data[x] = pd.cut(data[x], bins=bins)
+        data[x] = pd.cut(data[x], bins=bins, include_lowest=True)
+
+        if data[x].isnull().any():
+            raise ValueError('Some x values fall outside bins.')
 
     if hue_bins is not None:
-        if bins is not None:
-            data = data.copy()
-        data[hue] = pd.cut(data[hue], bins=hue_bins).astype(str)
+        data[hue] = pd.cut(data[hue], bins=hue_bins, include_lowest=True)
+
+        if data[hue].isnull().any():
+            raise ValueError('Some hue values fall outside hue_bins.')
+
+        data[hue] = data[hue].astype(str)
         # Ensure numerical ordering is preserved
         d = {}
         for bin in data[hue].unique():
@@ -80,20 +92,22 @@ def plot_prob_x_for_hue(x, data, hue,
     if max_xtick_len > 2:
         ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
 
-    ax.set_ylabel('p( {} | {} )'.format(x, hue))
-    ax.set_title('Normalized Interest by {}'.format(x))
+    ax.set_ylabel('P( {} | {} )'.format(x, hue))
+    title = 'Normalized Interest Level by {}'.format(x.title())
+    title += '\n(if no effect on interest, bars are even with each group)'
+    ax.set_title(title, y=1.02)
 
     return ax
 
-def set_bedbath_types(df, test=False):
+def set_bedbath_groups(df, test=False):
 
     df = df.copy()
     if test:  # separate columns for mutual exclusivity test
-        a, b, c, d = ('Type'+str(i) for i in range(4))
+        a, b, c, d = ('group'+str(i) for i in range(4))
     else:
-        a = b = c = d = 'Type'
+        a = b = c = d = 'group'
 
-    df['Type'] = 'reasonable'
+    df['group'] = 'reasonable'
 
     no_bed = df.bedrooms == 0
     studio = no_bed & (df.bathrooms==1)
@@ -105,20 +119,51 @@ def set_bedbath_types(df, test=False):
     df.loc[bed_gt_3bath, b] = 'bed > bath*3'
 
     only_bath_missing = ~no_bed & no_bath
-    df.loc[only_bath_missing, c] = 'bath == 0, with bedrooms'
+    df.loc[only_bath_missing, c] = 'only bathroom missing'
 
     all_missing = no_bath & no_bed
     df.loc[all_missing, d] = 'both missing'
 
     return df
 
+
+def plot_interest_pie(interest_series, **pie_kwargs):
+    """Plots proportion of interest levels in listing data.
+
+    Adapted from Matplotlib example:
+    https://matplotlib.org/_sources/examples/pie_and_polar_charts/pie_demo_features.rst.txt
+    """
+    labels = 'Low (1)', 'Medium (2)', 'High (3)'
+    cnts = interest_series.value_counts()
+    explode = [.05] * 3
+
+    with sns.color_palette(palette=sns.color_palette('Reds', 5)[:4]):
+        plt.pie(cnts, labels=labels, autopct='%1.1f%%', startangle=90,
+                explode=explode, **pie_kwargs)
+
+    # Equal aspect ratio ensures that pie is drawn as a circle.
+    plt.axis('equal')
+    plt.title('Proportion of Listings by Interest Level', y=1.05)
+
+    return plt.gca()
+
+
+def plot_count_comparison(x, df, df_te):
+    """Compare counts of x between train and test data."""
+    df = df[x].to_frame().assign(dataset='test')
+    df_te = df_te[x].to_frame().assign(dataset='train')
+
+    data = pd.concat([df, df_te])
+
+    return sns.countplot(x=x, hue='dataset', data=data)
+
 if __name__ == '__main__':
     DAT_DIR = '../Data/'
-    TRAIN_FP = ''.join([DAT_DIR, 'train.json'])
+    DF_TRAIN_PKL = ''.join([DAT_DIR, 'df_train.pkl'])
 
 
     # see if activity of agents affects interest
-    df = read_rental_interest(TRAIN_FP)
+    df = read_rental_interest(DF_TRAIN_PKL, read_pkl=True)
     prior = df.interest_level.mean()
     avg_int = (df.groupby('manager_id')['interest_level']
                .apply(exp_int, prior)

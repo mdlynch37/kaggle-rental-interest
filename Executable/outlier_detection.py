@@ -106,18 +106,19 @@ def drop_bbp_outl(df, msg=True):
 
     return df
 
+def is_lat_outl(lat):
+    return (lat == 0) | (40.95 < lat) | (lat < 40.4)
 
-def is_outlier_geo(latitude, longitude):
-    null = (latitude==0) | (longitude==0)
-    long_outl = (-73.7 < longitude) | (longitude < -74.05)
-    lat_outl = (40.95 < latitude) | (latitude < 40.4)
+def is_long_outl(long):
+    return (long == 0) | (-73.7 < long) | (long < -74.05)
 
-    return null | long_outl | lat_outl
+def is_geo_outl(lat, long):
+    return is_lat_outl(lat) | is_long_outl(long)
 
 
 def drop_geo_outl(df, msg=True):
     pre_len = len(df)
-    df = df.loc[~is_outlier_geo(df.latitude, df.longitude)]
+    df = df.loc[~is_geo_outl(df.latitude, df.longitude)]
     post_len = len(df)
     if msg:
         print(outl_dropped_msg('geo-coordinate', pre_len, post_len))
