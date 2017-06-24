@@ -1,7 +1,7 @@
 from sklearn.preprocessing import StandardScaler
 from preprocessing import (LogTransformer, WordCntExtractor, SqrtTransformer,
                            GroupSumExtractor, WordCntExtractor, LenExtractor,
-                           DayExtractor, LatLongImputer, BedBathImputer,
+                           DayBinarizer, LatLongImputer, BedBathImputer,
                            PriceOutlierDropper, WeekendExtractor,
                            combine_mappers)
 from sklearn.pipeline import Pipeline
@@ -15,10 +15,10 @@ extractor = DataFrameMapper([
     (['bedrooms'],  None),
     (['latitude'],  None),
     (['longitude'], None),
-    (['price'],     None),
+    ([('price')],     None),
 
-    # ('photos', LenExtractor(),
-    #      {'alias': 'n_photos'}),
+    ('photos', LenExtractor(),
+         {'alias': 'n_photos'}),
     ('features', LenExtractor(),
          {'alias': 'n_feats'}),
     ('description', WordCntExtractor(),
@@ -29,7 +29,7 @@ extractor = DataFrameMapper([
     ('building_id', GroupSumExtractor(),
          {'alias': 'n_buildings'}),
 
-#     ('created', DayExtractor()),
+#     ('created', DayBinarizer()),
 
 ], input_df=True, df_out=True)
 
@@ -103,7 +103,7 @@ scl_aggr_mapper = DataFrameMapper([
 date_mapper = DataFrameMapper([
 #     ('created', WeekendExtractor(),
 #         {'alias': 'is_weekend'}),
-    ('created', DayExtractor()),
+    ('created', DayBinarizer()),
 ], input_df=True, df_out=True)
 
 base_pipe = Pipeline([

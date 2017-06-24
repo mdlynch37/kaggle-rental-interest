@@ -2,6 +2,8 @@ import pandas as pd
 import pickle
 
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn_pandas import DataFrameMapper
+from preprocessing import *
 
 
 SEED = 42
@@ -56,6 +58,38 @@ def load_pickle(fp):
         obj = pickle.load(f)
     return obj
 
+def feature_prep(df, basic_imputes=False):
+    mapper = DataFrameMapper([
+
+            ('price', LogTransformer(),
+                {'alias': 'lg_price'}),
+            ('photos',
+                 [LenExtractor(), SqrtTransformer()],
+                 {'alias': 'n_photos'}),
+            ('features',
+                 [LenExtractor(), SqrtTransformer()],
+                 {'alias': 'n_feats'}),
+            ('description',
+                 [WordCntExtractor(), SqrtTransformer()],
+                 {'alias': 'descr_wcnt'}),
+
+            ('created', DayBinarizer()),
+
+    ], input_df=True, df_out=True)
+
+    new = mapper.fit_transform(df)
+    new.index = df.index
+
+    new['no_photo'] = new.n_photos == 0
+    new['no_feats'] = new.n_feats == 0
+    new['no_desc'] = new.descr_wcnt == 0
+
+    if basic_imputes:
+        df = BedBathImputer(imp_val=basic_imputes).fit_transform(df)
+        df = LatLongImputer(imp_val=basic_imputes).fit_transform(df)
+
+    return pd.concat([df, new], axis=1)
+
 class ItemSelector(BaseEstimator, TransformerMixin):
     """For data grouped by feature, select subset of data at a provided key.
 
@@ -94,6 +128,8 @@ class ItemSelector(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, data_dict):
+        # if self.key == ['bathrooms', 'bedrooms']:
+        #     print(len(data_dict))
         return data_dict[self.key]
 
 
