@@ -1,12 +1,13 @@
 from copy import deepcopy
 import pdb
 import warnings
-from imp import reload
+from importlib import reload
 import time
 from pprint import pprint
 import random
 from copy import deepcopy
 import pickle
+import re
 
 import pandas as pd
 import numpy as np
@@ -15,7 +16,6 @@ import matplotlib.pyplot as plt
 
 from sklearn.model_selection import (StratifiedShuffleSplit, train_test_split,
                                      validation_curve)
-from grid_explore import GridSearchExplorer
 from sklearn.ensemble import GradientBoostingClassifier, ExtraTreesClassifier
 from sklearn.feature_selection import SelectKBest, chi2, mutual_info_classif, f_classif
 from sklearn.pipeline import Pipeline, make_pipeline, FeatureUnion
@@ -30,6 +30,7 @@ from sklearn.ensemble import (GradientBoostingClassifier,
 from sklearn.base import TransformerMixin, BaseEstimator
 from sklearn.linear_model import LogisticRegression, RandomizedLogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.utils.validation import check_is_fitted
 from scipy import stats
 from IPython.display import display
 from sklearn_pandas import DataFrameMapper
@@ -39,17 +40,14 @@ from pyglmnet import GLM
 import pdir
 
 from outlier_detection import *
-from preprocessing import *
-from eda_plots import *
 from validation_plots import *
-from validation_plots import best_grid_results
-from main import *
 from main import read_rental_interest
 
 
 def exp_int(col, prior):
     """Expected interest level with Bayesian prior."""
     return (col.sum()+prior)/(len(col)+1)
+
 
 def concat_mappers(mappers, df_out=True, input_df=True):
     mapmerge_mappersper_features = []
@@ -60,13 +58,82 @@ def concat_mappers(mappers, df_out=True, input_df=True):
     )
     return mapper
 
+
 def concat_pipelines(pipelines):
     steps = it.chain(*(deepcopy(pipe.steps) for pipe in pipelines))
     return Pipeline(steps)
 
+
 def get_word_cnt(doc):
     # TODO: Could be more efficient than slow regex engine
     return len(re.findall(r'\w+', doc))
+
+
+def feature_prep(df, imp_val=False):
+    """Feature extraction and transformations that can be
+    performed before train_test_split, outside of Pipeline.
+
+    This is because these operations are done independently
+    on each row.
+
+    Parameters
+    ----------
+    df : pandas DataFrame
+    imp_val : False, default or int
+        Integer passed will fill in missing values for bedrooms,
+        bathrooms, latitude, and longitude values.
+        Designed with XGBoost's missing_val parameter in mind,
+        letting it used an algorithm to guess suitable values.
+
+    Returns
+    -------
+    df : pandas DataFrame with additional features
+    """
+    mapper = DataFrameMapper([
+
+            ('price', LogTransformer(),
+                {'alias': 'lg_price'}),
+            ('photos',
+                 [LenExtractor(), SqrtTransformer()],
+                 {'alias': 'n_photos'}),
+            ('features',
+                 [LenExtractor(), SqrtTransformer()],
+                 {'alias': 'n_feats'}),
+            ('description',
+                 [WordCntExtractor(), SqrtTransformer()],
+                 {'alias': 'descr_wcnt'}),
+
+            ('created', DayBinarizer()),
+
+    ], input_df=True, df_out=True)
+
+    new = mapper.fit_transform(df)
+    new.index = df.index
+
+    day_cols = dict(
+        created_Friday='fri',
+        created_Monday='mon',
+        created_Saturday='sat',
+        created_Sunday='sun',
+        created_Thursday='thu',
+        created_Tuesday='tue',
+        created_Wednesday='wed'
+    )
+    new = new.rename(columns=day_cols)
+
+    new['no_photo'] = new.n_photos == 0
+    new['no_feats'] = new.n_feats == 0
+    new['no_desc'] = new.descr_wcnt == 0
+
+    if imp_val is not False:
+        if not isinstance(imp_val, int):
+            raise ValueError('imp_val must be integer to fill missing values')
+
+        df = BedBathImputer(imp_val=imp_val).fit_transform(df)
+        df = LatLongImputer(imp_val=imp_val).fit_transform(df)
+
+    return pd.concat([df, new], axis=1)
+
 
 class LogTransformer(BaseEstimator, TransformerMixin):
 
@@ -76,8 +143,9 @@ class LogTransformer(BaseEstimator, TransformerMixin):
     def transform(self, X, y=None):
         return np.log(X)
 
-class ToFrame(BaseEstimator, TransformerMixin):
 
+class ToFrame(BaseEstimator, TransformerMixin):
+    """So that classifier is given names of columns"""
     def __init__(self, columns):
         self.columns = columns
 
@@ -96,6 +164,7 @@ class SqrtTransformer(BaseEstimator, TransformerMixin):
     def transform(self, X, y=None):
         return np.sqrt(X)
 
+
 class LenExtractor(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
@@ -113,6 +182,7 @@ class WordCntExtractor(BaseEstimator, TransformerMixin):
     def transform(self, X, y=None):
         return np.vectorize(get_word_cnt)(X)
 
+
 class DayBinarizer(LabelBinarizer):
 
     def __init__(self, **kwargs):
@@ -127,6 +197,7 @@ class DayBinarizer(LabelBinarizer):
         if not isinstance(y, pd.Series):
             raise TypeError('DayBinarizer only accepts Series.')
         return super().transform(y.dt.weekday_name)
+
 
 class WeekendExtractor(TransformerMixin):
 
@@ -258,6 +329,7 @@ class AverageInterestExtractor(BaseEstimator, TransformerMixin):
     #     # important when pipelining.
     #     return merged.values.reshape(-1, 1)
 
+
 class BoolFlagTransformer(BaseEstimator, TransformerMixin):
 
     def __init__(self, val, operator='eq'):
@@ -281,7 +353,7 @@ class BoolFlagTransformer(BaseEstimator, TransformerMixin):
 class BedBathImputer(BaseEstimator, TransformerMixin):
     """Imputes missing bedrooms and bathrooms"""
 
-    def __init__(self, imp_val=False):
+    def __init__(self, imp_val='agg_median'):
         self.imp_val = imp_val
 
     def fit(self, df, y=None):
@@ -294,7 +366,7 @@ class BedBathImputer(BaseEstimator, TransformerMixin):
         no_bath = df.bathrooms == 0
         all_miss = no_bath & no_bed
 
-        if self.imp_val is False:
+        if self.imp_val is 'agg_median':
             bed_med = np.median(df.bedrooms)
             bath_med = np.median(df.bathrooms)
             grp_bath_med = df.groupby('bedrooms')['bathrooms'].median()
@@ -315,11 +387,11 @@ class BedBathImputer(BaseEstimator, TransformerMixin):
 
 class LatLongImputer(BaseEstimator, TransformerMixin):
 
-    def __init__(self, imp_val=False):
+    def __init__(self, imp_val='mean'):
         self.imp_val = imp_val
 
     def fit(self, df, y=None):
-        if self.imp_val is False:
+        if self.imp_val == 'mean':
             self.lat_mean = df.latitude.mean()
             self.long_mean = df.longitude.mean()
 
@@ -329,7 +401,7 @@ class LatLongImputer(BaseEstimator, TransformerMixin):
     def transform(self, df, y=None):
         df = df.copy()
 
-        if self.imp_val is False:
+        if self.imp_val == 'mean':
             lat_val, long_val = self.lat_mean, self.long_mean
         else:
             lat_val = long_val = self.imp_val
@@ -338,6 +410,7 @@ class LatLongImputer(BaseEstimator, TransformerMixin):
         df.loc[df.longitude==0, 'longitude'] = long_val
 
         return df
+
 
 class PriceOutlierDropper(BaseEstimator, TransformerMixin):
 
@@ -358,44 +431,44 @@ class PriceOutlierDropper(BaseEstimator, TransformerMixin):
         return df.loc[~is_outl]
 
 
-extractor = FeatureUnion([
-    ('dense', Pipeline([
-        ('extract', FeatureUnion([
-            ('basic', FeatureUnion([
-                ('coordinates', make_pipeline(
-                    ItemSelector(['latitude', 'longitude']),
-                    LatLongImputer(),
-                )),
-                ('pre_processed', ItemSelector(
-                    ['lg_price', 'n_photos', 'n_feats', 'descr_wcnt'])),
-                ('rooms', make_pipeline(
-                    ItemSelector(['bathrooms', 'bedrooms']),
-                    BedBathImputer())),
-                ])),
+class ItemSelector(BaseEstimator, TransformerMixin):
+    """For data grouped by feature, select subset of data at a provided key.
 
-#             ('aggregate', make_pipeline(
-#                 FeatureUnion([
-#                     ('n_posts', make_pipeline(
-#                         ItemSelector(['manager_id']),
-#                         GroupSumExtractor())),
-#                     ('building_activity', make_pipeline(
-#                         ItemSelector(['building_id']),
-#                         GroupSumExtractor()))
-#                     ]),
-#                 LogTransformer(),
-#             )),
-        ])),
-        ('standardize', StandardScaler())
-    ])),
+    The data is expected to be stored in a 2D data structure, where the first
+    index is over features and the second is over samples.  i.e.
 
-    ('sparse', FeatureUnion([
-        ('day_names', ItemSelector([
-            'created_Friday', 'created_Monday', 'created_Saturday',
-            'created_Sunday', 'created_Thursday', 'created_Tuesday',
-            'created_Wednesday'
-            ])
-        ),
-        ('flags', ItemSelector(['no_photo', 'no_feats', 'no_desc']))
+    >> len(data[key]) == n_samples
 
-    ])),
-])
+    Please note that this is the opposite convention to scikit-learn feature
+    matrixes (where the first index corresponds to sample).
+
+    ItemSelector only requires that the collection implement getitem
+    (data[key]).  Examples include: a dict of lists, 2D numpy array, Pandas
+    DataFrame, numpy record array, etc.
+
+    >> data = {'a': [1, 5, 2, 5, 2, 8],
+               'b': [9, 4, 1, 4, 1, 3]}
+    >> ds = ItemSelector(key='a')
+    >> data['a'] == ds.transform(data)
+
+    ItemSelector is not designed to handle data grouped by sample.  (e.g. a
+    list of dicts).  If your data is structured this way, consider a
+    transformer along the lines of `sklearn.feature_extraction.DictVectorizer`.
+
+    Source: http://scikit-learn.org/stable/auto_examples/hetero_feature_union.html
+
+    Parameters
+    ----------
+    key : hashable, required
+        The key corresponding to the desired value in a mappable.
+    """
+    def __init__(self, key):
+        self.key = key
+
+    def fit(self, x, y=None):
+        return self
+
+    def transform(self, data_dict):
+        # if self.key == ['bathrooms', 'bedrooms']:
+        #     print(len(data_dict))
+        return data_dict[self.key]
