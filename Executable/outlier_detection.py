@@ -3,12 +3,21 @@ from scipy import stats
 
 
 def outl_dropped_msg(name, pre_len, post_len, k=None):
-    """Return info on outliers dropped."""
+    """Return info on outliers dropped.
+
+    Parameters
+    ----------
+    name : str
+        Name of feature whose outliers were dropped
+    {pre_len, post_len} : int
+        Number of items before and after outliers were dropped.
+    k : float
+        Tukey constant if Tukey's range test used to drop ouliers.
+    """
     diff = pre_len - post_len
     info = 'Dropped {} {} outliers ({:.2%})'.format(
         diff, name, diff/pre_len
     )
-
     if k is not None:
         info += ' with Tukey test constant {}'.format(k)
 
@@ -26,9 +35,12 @@ def is_outl_val(col, k=1.5, log=False):
     Parameters
     ----------
     col : pandas.Series
-        Specific feature to be assessed
-    k : int, default is 1.5
+        Specific feature to be assessed.
+    k : float, default is 1.5
+        Tukey constant for Tukey's range test.
     log : bool, default is False
+        If True, apply natural logarithm to values before applying
+        Tukey's range test.
 
     Returns
     -------
@@ -45,13 +57,14 @@ def is_outl_val(col, k=1.5, log=False):
     return result
 
 
-def is_price_outl(price, k=3, log=True):
-    """Return boolean Series of outliers using modified Tukey method"""
-    price = np.log(price) if log else price
-    return is_outl_val(price, k=k)
+def is_price_outl(price_col, k=3, log=True):
+    """Return boolean Series from using modified Tukey range test."""
+    price = np.log(price_col) if log else price_col
+    return is_outl_val(price_col, k=k)
 
 
 def drop_price_outl(df, k=3, log=True, msg=True):
+    """Drop outliers deterined by Tukey's range test."""
     pre_len = len(df)
     df = df.loc[~is_price_outl(df.price, k=k, log=log)]
     post_len = len(df)
@@ -106,14 +119,22 @@ def drop_bbp_outl(df, msg=True):
 
     return df
 
+
 def is_lat_outl(lat):
-    return (lat == 0) | (40.95 < lat) | (lat < 40.4)
+    return ((lat == 0) |
+            (lat < 40) |  # left limit
+            (lat > 40.95)   # right limit
+    )
+
 
 def is_long_outl(long):
-    return (long == 0) | (-73.7 < long) | (long < -74.05)
+    return ((long == 0) |
+            (-73.7 < long) |  # top limit
+            (-74.05 > long))   # bottom limit
 
-def is_geo_outl(lat, long):
-    return is_lat_outl(lat) | is_long_outl(long)
+
+def is_geo_outl(lat_col, long_col):
+    return is_lat_outl(lat_col) | is_long_outl(long_col)
 
 
 def drop_geo_outl(df, msg=True):
@@ -129,11 +150,8 @@ def drop_geo_outl(df, msg=True):
 def imp_missing_baths(df):
     """Imputes bathroom values of 0."""
 
-    def impute_mode(gr_df):
+    def impute_median(gr_df):
         median = np.median(gr_df.bathrooms)
         return gr_df.replace(dict(bathrooms={0: median}))
 
     return df.groupby('bedrooms', group_keys=False).apply(impute_mode)
-
-
-
