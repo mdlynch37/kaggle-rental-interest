@@ -69,7 +69,7 @@ def get_word_cnt(doc):
     return len(re.findall(r'\w+', doc))
 
 
-def feature_prep(df, imp_val=False):
+def feature_prep(df, imp_constant=False):
     """Feature extraction and transformations that can be
     performed before train_test_split, outside of Pipeline.
 
@@ -79,7 +79,7 @@ def feature_prep(df, imp_val=False):
     Parameters
     ----------
     df : pandas DataFrame
-    imp_val : False, default or int
+    imp_constant : False, default or int
         Integer passed will fill in missing values for bedrooms,
         bathrooms, latitude, and longitude values.
         Designed with XGBoost's missing_val parameter in mind,
@@ -89,19 +89,23 @@ def feature_prep(df, imp_val=False):
     -------
     df : pandas DataFrame with additional features
     """
+    # LogTransformer and SqrtTransformer not necessary for tree-based
+    # algorithms, but since they are so cheap, they are left for
+    # simplicity's sake
+
     mapper = DataFrameMapper([
 
             ('price', LogTransformer(),
-                {'alias': 'lg_price'}),
+                {'alias': 'price_lg'}),
             ('photos',
                  [LenExtractor(), SqrtTransformer()],
-                 {'alias': 'n_photos'}),
+                 {'alias': 'n_photos_sq'}),
             ('features',
                  [LenExtractor(), SqrtTransformer()],
-                 {'alias': 'n_feats'}),
+                 {'alias': 'n_feats_sq'}),
             ('description',
                  [WordCntExtractor(), SqrtTransformer()],
-                 {'alias': 'descr_wcnt'}),
+                 {'alias': 'descr_wcnt_sq'}),
 
             ('created', DayBinarizer()),
 
@@ -111,26 +115,26 @@ def feature_prep(df, imp_val=False):
     new.index = df.index
 
     day_cols = dict(
-        created_Friday='fri',
-        created_Monday='mon',
-        created_Saturday='sat',
-        created_Sunday='sun',
-        created_Thursday='thu',
-        created_Tuesday='tue',
-        created_Wednesday='wed'
+        created_Friday='day_fri',
+        created_Monday='day_mon',
+        created_Saturday='day_sat',
+        created_Sunday='day_sun',
+        created_Thursday='day_thu',
+        created_Tuesday='day_tue',
+        created_Wednesday='day_wed'
     )
     new = new.rename(columns=day_cols)
 
-    new['no_photo'] = new.n_photos == 0
-    new['no_feats'] = new.n_feats == 0
-    new['no_desc'] = new.descr_wcnt == 0
+    if imp_constant is not False:
+        if not isinstance(imp_constant, int):
+            raise ValueError('imp_constant must be integer to fill missing values')
 
-    if imp_val is not False:
-        if not isinstance(imp_val, int):
-            raise ValueError('imp_val must be integer to fill missing values')
+        df = BedBathImputer(how=imp_constant).fit_transform(df)
+        df = LatLongImputer(how=imp_constant).fit_transform(df)
 
-        df = BedBathImputer(imp_val=imp_val).fit_transform(df)
-        df = LatLongImputer(imp_val=imp_val).fit_transform(df)
+    new['no_photo_sq'] = new.n_photos_sq == 0
+    new['no_feats_sq'] = new.n_feats_sq == 0
+    new['no_desc_sq'] = new.descr_wcnt_sq == 0
 
     return pd.concat([df, new], axis=1)
 
@@ -201,13 +205,13 @@ class DayBinarizer(LabelBinarizer):
 
 class WeekendExtractor(TransformerMixin):
 
-    def fit(self, y):
+    def fit(self, y=None):
         if not isinstance(y, pd.Series):
             raise TypeError('WeekendExtractor only accepts Series.')
 
         return self
 
-    def transform(self, y):
+    def transform(self, y=None):
         if not isinstance(y, pd.Series):
             raise TypeError('WeekendExtractor only accepts Series.')
 
@@ -351,63 +355,160 @@ class BoolFlagTransformer(BaseEstimator, TransformerMixin):
 
 
 class BedBathImputer(BaseEstimator, TransformerMixin):
-    """Imputes missing bedrooms and bathrooms"""
+    """Imputes missing bedrooms and bathrooms in DataFrame.
 
-    def __init__(self, imp_val='agg_median'):
-        self.imp_val = imp_val
+    In two cases is data considered missing, each treated differently
+    if how='medians' (in this order):
+    1. Bedrooms and bathrooms, when both are zeros
+    2. Zero-values bathrooms, when bedrooms > 0
+    Note: Zero-valued bedrooms with bathrooms > 0 can be studios.
+
+    If any other value but 'medians' is passed, that value will be used
+    to impute missing values by the same criteria above.
+
+    For case 1, the impute val for both bed and bath is the global
+    median from the fitted dataset.
+    For case 2, the impute val for bath will depend on its
+    corresponding bed value. The impute val will be the median
+    taken from rows with the same bed value (using groupby groups),
+    also taken from the fitted dataset.
+    """
+
+    def __init__(self, how='medians'):
+        """
+        Parameters
+        ----------
+        how : 'medians', or any other value for simple impute
+            Zero is redundant and will raise exception.
+        """
+        # Missing values bedrooms and bathrooms will always be 0
+        if how == 0:
+            raise ValueError('Imputation value of zero is redundant.')
+        self.how = how
 
     def fit(self, df, y=None):
+        if self.how == 'medians':
+            self.bed_median = np.median(df.bedrooms)
+            self.bath_median = np.median(df.bathrooms)
+            self.grp_bath_median = df.groupby('bedrooms')['bathrooms'].median()
+        else:
+            self.imp_constant = self.how
+
+        self.fitted = True
         return self
 
     # 313 imputed with .35 dataset
     def transform(self, df, y=None):
+        check_is_fitted(self, 'fitted')
+
         df = df.copy()
         no_bed = df.bedrooms == 0
         no_bath = df.bathrooms == 0
-        all_miss = no_bath & no_bed
+        both_miss = no_bath & no_bed
 
-        if self.imp_val is 'agg_median':
-            bed_med = np.median(df.bedrooms)
-            bath_med = np.median(df.bathrooms)
-            grp_bath_med = df.groupby('bedrooms')['bathrooms'].median()
+        if self.how is 'medians':
+            # Case 1:
+            df.loc[both_miss, 'bedrooms'] = self.bed_median
+            df.loc[both_miss, 'bathrooms'] = self.bath_median
 
-            df.loc[all_miss, 'bedrooms'] = bed_med
-            df.loc[all_miss, 'bathrooms'] = bath_med
-
+            # Case 2:
+            # For each group of rows, grouped by bedrooms values,
+            # check for missing bathrooms. If there are some, get
+            # median from fitted dataset's corresponding group.
             gb = df.groupby('bedrooms')
-            for n_beds, gr_df in gb:
-                idx = gr_df.loc[gr_df.bathrooms==0].index
-                df.loc[idx, 'bathrooms'] = grp_bath_med[n_beds]
+            for n_beds, bed_grp in gb:
+                grp_missing = bed_grp.bathrooms==0
+                if not grp_missing.any():
+                    continue
+
+                # If bedroom val not in fitted data, thus no matching
+                # group use group for nearest bedroom value in fitted
+                # dataset.
+                try:
+                    imp_val = self.grp_bath_median[n_beds]
+                except KeyError:
+                    # Group keys (index in series) are always sorted
+                    # ascending, thus when two values are equally near
+                    # the lower one is taken.
+                    nearest_idx = (np.abs(self.grp_bath_median.index - n_beds)
+                                   .argmin())
+                    imp_val = self.grp_bath_median[nearest_idx]
+
+                # Get index of missing bathrooms for bedroom group and
+                # do imputation in dataset
+                idx = bed_grp.loc[grp_missing].index
+                df.loc[idx, 'bathrooms'] = imp_val
         else:
-            df.loc[all_miss, 'bedrooms'] = self.imp_val
-            df.loc[no_bath, 'bathrooms'] = self.imp_val
+            # Case 1
+            df.loc[both_miss, 'bedrooms'] = self.imp_constant
+            # Case 2
+            df.loc[no_bath, 'bathrooms'] = self.imp_constant
+
+        # Updated for assertion check
+        no_bed = df.bedrooms == 0
+        no_bath = df.bathrooms == 0
+        both_miss = no_bath & no_bed
+
+        # Edge-case would be if how='medians' and impute value
+        # from fitted group medians is zero.
+        # This could happen if there are so few bedroom values in
+        # the fitted dataset that any of those values having no
+        # bathrooms could cause a zero-valued median.
+        assert not (no_bath & both_miss).any(), (
+            'Impute failed. Potential but rare edge case details in code.')
 
         return df
 
 
 class LatLongImputer(BaseEstimator, TransformerMixin):
+    """Imputes missing latitude and longitude values in DataFrame."""
 
-    def __init__(self, imp_val='mean'):
-        self.imp_val = imp_val
+    def __init__(self, how='mean', broad=False):
+        """
+        Parameters
+        ----------
+        how : 'mean', or any other value for simple impute
+            Zero is redundant and will raise exception.
+        broad : bool, detault False
+            If broad is True, use broader outlier definition
+            used when plotting. If false, only consider zeros
+            missing values.
+        """
+        if how == 0:
+            raise ValueError('Imputation value of zero is redundant.')
+        self.how = how
+        self.broad = broad
 
     def fit(self, df, y=None):
-        if self.imp_val == 'mean':
+        if self.how == 'mean':
             self.lat_mean = df.latitude.mean()
             self.long_mean = df.longitude.mean()
+        else:
+            self.imp_constant = self.how
+
+        self.fitted = True
 
         return self
 
-    # 68 imputed with .35 dataset
+    # 68 imputed with .35 dataset with broad definition
     def transform(self, df, y=None):
+        check_is_fitted(self, 'fitted')
         df = df.copy()
 
-        if self.imp_val == 'mean':
+        if self.how == 'mean':
             lat_val, long_val = self.lat_mean, self.long_mean
         else:
-            lat_val = long_val = self.imp_val
+            lat_val = long_val = self.imp_constant
 
-        df.loc[df.latitude==0, 'latitude'] = lat_val
-        df.loc[df.longitude==0, 'longitude'] = long_val
+        if self.broad:
+            lat_outl  = is_lat_outl(df.latitude)
+            long_outl = is_long_outl(df.longitude)
+        else:
+            lat_outl  = df.latitude==0
+            long_outl = df.longitude==0
+
+        df.loc[lat_outl, 'latitude'] = lat_val
+        df.loc[long_outl, 'longitude'] = long_val
 
         return df
 
@@ -417,10 +518,10 @@ class PriceOutlierDropper(BaseEstimator, TransformerMixin):
     def __init__(self, tukey=False):
         self.tukey = tukey
 
-    def fit(self, df, y):
+    def fit(self, df, y=None):
         return self
 
-    def transform(self, df, y):
+    def transform(self, df, y=None):
         df = df.copy()
 
         if self.tukey:
@@ -465,10 +566,9 @@ class ItemSelector(BaseEstimator, TransformerMixin):
     def __init__(self, key):
         self.key = key
 
-    def fit(self, x, y=None):
+    def fit(self, data, y=None):
         return self
 
-    def transform(self, data_dict):
-        # if self.key == ['bathrooms', 'bedrooms']:
-        #     print(len(data_dict))
-        return data_dict[self.key]
+    def transform(self, data):
+        return data[self.key]
+
