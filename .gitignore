@@ -1,9 +1,6 @@
-## template from sample at
-# http://islegend.com/development/setting-global-gitignore-mac-windows/
-## Note: local .gitignore takes precedence
-## Set up with git config --global core.excludesfile '~/.gitignore_global'
-## NOTE: Must commit changes to the git repo first before edits take affect
-##      (I think...)
+
+# project-specific #
+Data/*
 
 # others #
 ##########
