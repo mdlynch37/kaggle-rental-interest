@@ -1,47 +1,21 @@
-from copy import deepcopy
-import pdb
-import warnings
-from importlib import reload
-import time
-from pprint import pprint
-import random
-from copy import deepcopy
-import pickle
 import re
+from copy import deepcopy
 
-import pandas as pd
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-from sklearn.model_selection import (StratifiedShuffleSplit, train_test_split,
-                                     validation_curve)
-from sklearn.ensemble import GradientBoostingClassifier, ExtraTreesClassifier
-from sklearn.feature_selection import SelectKBest, chi2, mutual_info_classif, f_classif
-from sklearn.pipeline import Pipeline, make_pipeline, FeatureUnion
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import accuracy_score, log_loss, make_scorer
-from sklearn.decomposition import PCA, TruncatedSVD
-from sklearn.preprocessing import (LabelBinarizer, LabelEncoder,
-                                   MinMaxScaler, StandardScaler,
-                                   OneHotEncoder, Imputer)
-from sklearn.ensemble import (GradientBoostingClassifier,
-                              RandomForestClassifier)
-from sklearn.base import TransformerMixin, BaseEstimator
-from sklearn.linear_model import LogisticRegression, RandomizedLogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.utils.validation import check_is_fitted
-from scipy import stats
-from IPython.display import display
-from sklearn_pandas import DataFrameMapper
+import pandas as pd
 import xgboost as xgb
-from pyglmnet import GLM
+from IPython.display import display
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.model_selection import GridSearchCV
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import FeatureUnion, Pipeline, make_pipeline
+from sklearn.preprocessing import (Imputer, LabelBinarizer, LabelEncoder,
+                                   OneHotEncoder, StandardScaler)
+from sklearn.utils.validation import check_is_fitted
+from sklearn_pandas import DataFrameMapper
 
-import pdir
-
-from outlier_detection import *
-from validation_plots import *
-from main import read_rental_interest
+from outlier_detection import (drop_bbp_outl, drop_bed_outl, is_lat_outl,
+                               is_long_outl, is_price_outl)
 
 
 def exp_int(col, prior):
@@ -50,7 +24,7 @@ def exp_int(col, prior):
 
 
 def concat_mappers(mappers, df_out=True, input_df=True):
-    mapmerge_mappersper_features = []
+    mapper_features = []
     _ = [mapper_features.extend(deepcopy(x.features)) for x in mappers]
 
     mapper = DataFrameMapper(
@@ -95,19 +69,19 @@ def feature_prep(df, imp_constant=False):
 
     mapper = DataFrameMapper([
 
-            ('price', LogTransformer(),
-                {'alias': 'price_lg'}),
-            ('photos',
-                 [LenExtractor(), SqrtTransformer()],
-                 {'alias': 'n_photos_sq'}),
-            ('features',
-                 [LenExtractor(), SqrtTransformer()],
-                 {'alias': 'n_feats_sq'}),
-            ('description',
-                 [WordCntExtractor(), SqrtTransformer()],
-                 {'alias': 'descr_wcnt_sq'}),
+        ('price', LogTransformer(),
+            {'alias': 'price_lg'}),
+        ('photos',
+            [LenExtractor(), SqrtTransformer()],
+            {'alias': 'n_photos_sq'}),
+        ('features',
+            [LenExtractor(), SqrtTransformer()],
+            {'alias': 'n_feats_sq'}),
+        ('description',
+            [WordCntExtractor(), SqrtTransformer()],
+            {'alias': 'descr_wcnt_sq'}),
 
-            ('created', DayBinarizer()),
+        ('created', DayBinarizer()),
 
     ], input_df=True, df_out=True)
 
@@ -127,11 +101,14 @@ def feature_prep(df, imp_constant=False):
 
     if imp_constant is not False:
         if not isinstance(imp_constant, int):
-            raise ValueError('imp_constant must be integer to fill missing values')
+            raise ValueError(
+                'imp_constant must be integer to fill missing values'
+            )
 
         df = BedBathImputer(how=imp_constant).fit_transform(df)
         df = LatLongImputer(how=imp_constant).fit_transform(df)
 
+    # Indicator features for logistic regression.
     new['no_photo_sq'] = new.n_photos_sq == 0
     new['no_feats_sq'] = new.n_feats_sq == 0
     new['no_desc_sq'] = new.descr_wcnt_sq == 0
@@ -236,7 +213,6 @@ class GroupSumExtractor(BaseEstimator, TransformerMixin):
     def __init__(self, normalize=True):
         self.normalize = normalize
 
-
     def fit(self, df, y=None):
         if not isinstance(df, pd.DataFrame) or df.shape[1] != 1:
             raise TypeError(
@@ -263,7 +239,6 @@ class GroupSumExtractor(BaseEstimator, TransformerMixin):
         else:
             cnts = self.fitted_cnts.add(new_cnts, fill_value=0)
             n += self.fitted_n
-
 
         if self.normalize:
             cnts = cnts/n
@@ -373,7 +348,6 @@ class BedBathImputer(BaseEstimator, TransformerMixin):
     taken from rows with the same bed value (using groupby groups),
     also taken from the fitted dataset.
     """
-
     def __init__(self, how='medians'):
         """
         Parameters
@@ -417,7 +391,7 @@ class BedBathImputer(BaseEstimator, TransformerMixin):
             # median from fitted dataset's corresponding group.
             gb = df.groupby('bedrooms')
             for n_beds, bed_grp in gb:
-                grp_missing = bed_grp.bathrooms==0
+                grp_missing = bed_grp.bathrooms == 0
                 if not grp_missing.any():
                     continue
 
@@ -504,8 +478,8 @@ class LatLongImputer(BaseEstimator, TransformerMixin):
             lat_outl  = is_lat_outl(df.latitude)
             long_outl = is_long_outl(df.longitude)
         else:
-            lat_outl  = df.latitude==0
-            long_outl = df.longitude==0
+            lat_outl  = df.latitude == 0
+            long_outl = df.longitude == 0
 
         df.loc[lat_outl, 'latitude'] = lat_val
         df.loc[long_outl, 'longitude'] = long_val
@@ -556,7 +530,8 @@ class ItemSelector(BaseEstimator, TransformerMixin):
     list of dicts).  If your data is structured this way, consider a
     transformer along the lines of `sklearn.feature_extraction.DictVectorizer`.
 
-    Source: http://scikit-learn.org/stable/auto_examples/hetero_feature_union.html
+    Source:
+    http://scikit-learn.org/stable/auto_examples/hetero_feature_union.html
 
     Parameters
     ----------
@@ -571,4 +546,3 @@ class ItemSelector(BaseEstimator, TransformerMixin):
 
     def transform(self, data):
         return data[self.key]
-
