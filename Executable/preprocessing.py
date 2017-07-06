@@ -1,5 +1,6 @@
-import re
 from copy import deepcopy
+import itertools as it
+import re
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ def exp_int(col, prior):
 
 
 def concat_mappers(mappers, df_out=True, input_df=True):
+    """Concatenate DataFrameMapper feature transformations."""
     mapper_features = []
     _ = [mapper_features.extend(deepcopy(x.features)) for x in mappers]
 
@@ -34,12 +36,13 @@ def concat_mappers(mappers, df_out=True, input_df=True):
 
 
 def concat_pipelines(pipelines):
+    """Merge Pipeline steps into new Pipeline instance."""
     steps = it.chain(*(deepcopy(pipe.steps) for pipe in pipelines))
     return Pipeline(steps)
 
 
 def get_word_cnt(doc):
-    # TODO: Could be more efficient than slow regex engine
+    """Extract wordcount from string."""
     return len(re.findall(r'\w+', doc))
 
 
@@ -52,7 +55,7 @@ def feature_prep(df, imp_constant=False):
 
     Parameters
     ----------
-    df : pandas DataFrame
+    df : DataFrame
     imp_constant : False, default or int
         Integer passed will fill in missing values for bedrooms,
         bathrooms, latitude, and longitude values.
@@ -61,12 +64,12 @@ def feature_prep(df, imp_constant=False):
 
     Returns
     -------
-    df : pandas DataFrame with additional features
+    df : DataFrame with modified and additional features
     """
+
     # LogTransformer and SqrtTransformer not necessary for tree-based
     # algorithms, but since they are so cheap, they are left for
     # simplicity's sake
-
     mapper = DataFrameMapper([
 
         ('price', LogTransformer(),
@@ -104,7 +107,6 @@ def feature_prep(df, imp_constant=False):
             raise ValueError(
                 'imp_constant must be integer to fill missing values'
             )
-
         df = BedBathImputer(how=imp_constant).fit_transform(df)
         df = LatLongImputer(how=imp_constant).fit_transform(df)
 
@@ -113,20 +115,16 @@ def feature_prep(df, imp_constant=False):
     new['no_feats_sq'] = new.n_feats_sq == 0
     new['no_desc_sq'] = new.descr_wcnt_sq == 0
 
+    # Include unchanged features.
     return pd.concat([df, new], axis=1)
 
 
-class LogTransformer(BaseEstimator, TransformerMixin):
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X, y=None):
-        return np.log(X)
-
-
 class ToFrame(BaseEstimator, TransformerMixin):
-    """So that classifier is given names of columns"""
+    """Transform numpy array into DataFrame with column names.
+
+    Example usage: pipeline step before XGBoostClassifer that uses
+    column names when returning feature importance data.
+    """
     def __init__(self, columns):
         self.columns = columns
 
@@ -137,8 +135,17 @@ class ToFrame(BaseEstimator, TransformerMixin):
         return pd.DataFrame(X, columns=self.columns)
 
 
-class SqrtTransformer(BaseEstimator, TransformerMixin):
+class LogTransformer(BaseEstimator, TransformerMixin):
+    """Simple transformer that applies log to array."""
+    def fit(self, X, y=None):
+        return self
 
+    def transform(self, X, y=None):
+        return np.log(X)
+
+
+class SqrtTransformer(BaseEstimator, TransformerMixin):
+    """Simple transformer that applies sqrt to array."""
     def fit(self, X, y=None):
         return self
 
@@ -147,7 +154,7 @@ class SqrtTransformer(BaseEstimator, TransformerMixin):
 
 
 class LenExtractor(BaseEstimator, TransformerMixin):
-
+    """Extract length of array values that has __len__ attribute."""
     def fit(self, X, y=None):
         return self
 
@@ -156,7 +163,7 @@ class LenExtractor(BaseEstimator, TransformerMixin):
 
 
 class WordCntExtractor(BaseEstimator, TransformerMixin):
-
+    """Extract wordcount of array string values."""
     def fit(self, X, y=None):
         return self
 
@@ -165,34 +172,38 @@ class WordCntExtractor(BaseEstimator, TransformerMixin):
 
 
 class DayBinarizer(LabelBinarizer):
-
+    """Extract dummy variables from Series of type np.datetime64."""
     def __init__(self, **kwargs):
+        """
+        Parameters
+        ----------
+        kwargs : key, value mappings
+            Keyword arguments are passed to parent LabelBinarizer.
+        """
         super().__init__(**kwargs)
 
-    def fit(self, y, _=None):
-        if not isinstance(y, pd.Series):
+    def fit(self, series, y=None):
+        if not isinstance(series, pd.Series):
             raise TypeError('DayBinarizer only accepts Series.')
-        return super().fit(y.dt.weekday_name)
+        return super().fit(series.dt.weekday_name)
 
-    def transform(self, y, _=None):
-        if not isinstance(y, pd.Series):
+    def transform(self, series, y=None):
+        if not isinstance(series, pd.Series):
             raise TypeError('DayBinarizer only accepts Series.')
-        return super().transform(y.dt.weekday_name)
+        return super().transform(series.dt.weekday_name)
 
 
-class WeekendExtractor(TransformerMixin):
-
-    def fit(self, y=None):
-        if not isinstance(y, pd.Series):
+class WeekendExtractor(BaseEstimator, TransformerMixin):
+    """Extract indicator feature from Series of type np.datetime64."""
+    def fit(self, series, y=None):
+        if not isinstance(series, pd.Series):
             raise TypeError('WeekendExtractor only accepts Series.')
-
         return self
 
-    def transform(self, y=None):
-        if not isinstance(y, pd.Series):
+    def transform(self, series, y=None):
+        if not isinstance(series, pd.Series):
             raise TypeError('WeekendExtractor only accepts Series.')
-
-        return y.dt.weekday > 4
+        return series.dt.weekday > 4
 
 
 class GroupSumExtractor(BaseEstimator, TransformerMixin):
@@ -211,9 +222,18 @@ class GroupSumExtractor(BaseEstimator, TransformerMixin):
     transformation keeps counts in the same scale for predictions.
     """
     def __init__(self, normalize=True):
+        """normalize attribute used for testing purposes."""
         self.normalize = normalize
 
     def fit(self, df, y=None):
+        """See class docstring for description.
+        Parameters
+        ----------
+        df : DataFrame
+            Must have single column.
+        y : None
+            Pass-through parameter for Pipeline compatability.
+        """
         if not isinstance(df, pd.DataFrame) or df.shape[1] != 1:
             raise TypeError(
                 'GroupSumExtractor only accepts DataFrame with one column.')
@@ -223,12 +243,11 @@ class GroupSumExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, df, y=None):
+        """See class docstring for description."""
         if not isinstance(df, pd.DataFrame) or df.shape[1] != 1:
             raise TypeError(
                 'GroupSumExtractor only accepts DataFrame with one column.')
         check_is_fitted(self, 'fitted_cnts')
-
-        df = df.copy()
 
         new_cnts = df.iloc[:, 0].value_counts()
         n = len(df)
@@ -246,14 +265,14 @@ class GroupSumExtractor(BaseEstimator, TransformerMixin):
                            right_index=True)
                     .loc[:, ['cnts']]
         )
+        # See test_preprocessing.py for more thorough testing.
         assert not merged.isnull().any().any(), (
-            'DataFrame from merge should not have any missing values.')
-
-        # Shape for valid input to other feature transformers,
-        # important when pipelining.
+            'DataFrame from merge should not have any missing values.'
+        )
         return merged
 
 
+# TODO: Finish writing transformer
 class AverageInterestExtractor(BaseEstimator, TransformerMixin):
     """Transform values into counts of those values.
 
@@ -310,7 +329,7 @@ class AverageInterestExtractor(BaseEstimator, TransformerMixin):
 
 
 class BoolFlagTransformer(BaseEstimator, TransformerMixin):
-
+    """Transform features into boolean from comparison."""
     def __init__(self, val, operator='eq'):
         self.val = val
         self.operator = operator
@@ -371,7 +390,6 @@ class BedBathImputer(BaseEstimator, TransformerMixin):
         self.fitted = True
         return self
 
-    # 313 imputed with .35 dataset
     def transform(self, df, y=None):
         check_is_fitted(self, 'fitted')
 
@@ -464,7 +482,6 @@ class LatLongImputer(BaseEstimator, TransformerMixin):
 
         return self
 
-    # 68 imputed with .35 dataset with broad definition
     def transform(self, df, y=None):
         check_is_fitted(self, 'fitted')
         df = df.copy()
@@ -485,25 +502,6 @@ class LatLongImputer(BaseEstimator, TransformerMixin):
         df.loc[long_outl, 'longitude'] = long_val
 
         return df
-
-
-class PriceOutlierDropper(BaseEstimator, TransformerMixin):
-
-    def __init__(self, tukey=False):
-        self.tukey = tukey
-
-    def fit(self, df, y=None):
-        return self
-
-    def transform(self, df, y=None):
-        df = df.copy()
-
-        if self.tukey:
-            is_outl = is_price_outl(df.price, k=tukey, log=True)
-        else:
-            # price outliers, based on values determined through analysis
-            is_outl = (df.price < 600) | (df.price > 1e6)
-        return df.loc[~is_outl]
 
 
 class ItemSelector(BaseEstimator, TransformerMixin):
@@ -530,7 +528,7 @@ class ItemSelector(BaseEstimator, TransformerMixin):
     list of dicts).  If your data is structured this way, consider a
     transformer along the lines of `sklearn.feature_extraction.DictVectorizer`.
 
-    Source:
+    Adapted from:
     http://scikit-learn.org/stable/auto_examples/hetero_feature_union.html
 
     Parameters

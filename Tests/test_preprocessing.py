@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 
 """
-we test preprocessing functions.
+Test preprocessing functions.
 """
-
-import pandas as pd
-from pandas.util.testing import assert_series_equal, assert_frame_equal
 from numpy.testing import assert_array_equal
 import numpy as np
+import pandas as pd
+from pandas.util.testing import assert_series_equal, assert_frame_equal
 
 from preprocessing import exp_int, GroupSumExtractor
+
 
 class TestRentalInterest:
 
@@ -29,6 +29,7 @@ class TestRentalInterest:
         exp_int2 = pd.Series(dict(a=exp_a, b=exp_b, c=exp_c))
 
         assert_series_equal(exp_int1, exp_int2, check_names=False)
+
 
 class TestGroupSumExtractor:
 
@@ -69,6 +70,7 @@ class TestGroupSumExtractor:
 
         result = fitted.transform(test)
         assert_array_equal(result.values, expected)
+
 
 class _TestAverageInterestExtractor:
 
@@ -112,11 +114,3 @@ class _TestAverageInterestExtractor:
         result = fitted.transform(train)
 
         assert_dataframe_equal(result, expected)
-
-
-
-
-
-
-
-
