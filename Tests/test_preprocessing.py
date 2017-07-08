@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 Test preprocessing functions.
 """
@@ -20,7 +18,9 @@ class TestRentalInterest:
         df = pd.DataFrame(dict(manager_id=man_ids, interest_level=int_lev))
 
         prior = 1.2
-        exp_int1 = df.groupby('manager_id')['interest_level'].apply(exp_int, prior)
+        exp_int1 = (df.groupby('manager_id')['interest_level']
+                      .apply(exp_int, prior)
+        )
 
         exp_a = (prior + 1 + 2 + 3)/4
         exp_b = (prior + 2 + 3)/3

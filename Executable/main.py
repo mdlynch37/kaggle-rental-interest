@@ -1,3 +1,4 @@
+
 import pickle
 
 import pandas as pd
@@ -54,8 +55,8 @@ def read_rental_interest(fp, n=None, frac=None, random_state=None,
     if fp.split('.')[-1] == 'pkl':
         df = load_pickle(fp)
     else:
-        df=(pd.read_json(fp)
-              .set_index('listing_id')
+        df = (pd.read_json(fp)
+                .set_index('listing_id')
         )
         df.created = pd.to_datetime(df.created)
 
@@ -103,6 +104,3 @@ def load_pickle(fp):
     with open(fp, 'rb') as f:
         obj = pickle.load(f)
     return obj
-
-
-

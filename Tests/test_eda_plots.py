@@ -1,10 +1,7 @@
-# -*- coding: utf-8 -*-
-
 """
 Test exploratory data analysis plot functions.
 """
-import sys
-sys.path.append('../Executable')
+
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,26 +9,14 @@ import pandas as pd
 from pandas.util.testing import assert_frame_equal
 import pytest
 
+import sys
+sys.path.append('../Executable')
+
 from eda_plots import ConditionalProbabilities
 from main import read_rental_interest
 
-SEED = 42
-
 
 class TestConditionalProbabilities:
-
-    @pytest.fixture
-    def df(self):
-        """Setup data, with len a multiple of 3, i.e. num labels."""
-
-        df = read_rental_interest('df_train.pkl')
-        actual_len = len(df)
-        good_len = 49352
-        assert actual_len == good_len, (
-            'Pickled DataFrame must have length {}, but is {}.'.format(
-                good_len, actual_len)
-        )
-        return df
 
     def test_cond_probs(self):
         dfs = []

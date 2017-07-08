@@ -20,10 +20,12 @@ def best_xgb_cv_score(eval_hist):
     -------
     results : str, formatted
     """
-    best_score  = eval_hist['test-mlogloss-mean'].min()
-    best_data   = (eval_hist.loc[eval_hist['test-mlogloss-mean']==best_score]
-                            .iloc[0]  # If tie between two, take first.
-    )
+    is_lowest  = (eval_hist['test-mlogloss-mean'] ==
+                  eval_hist['test-mlogloss-mean'].min())
+
+    # If tie between two, take first.
+    best_data   = eval_hist.loc[is_lowest].iloc[0]
+
     best_round  = best_data.name
     best_score  = best_data.at['test-mlogloss-mean']
     best_std    = best_data.at['test-mlogloss-std']
@@ -55,7 +57,7 @@ def best_grid_score(grid):
     best_score = grid.best_score_
 
     res = pd.DataFrame(grid.cv_results_)
-    best_res    = res.loc[res.mean_test_score==best_score].iloc[0]
+    best_res    = res.loc[res.mean_test_score == best_score].iloc[0]
 
     best_std    = best_res['std_test_score']
     train_score = best_res['mean_train_score']
@@ -244,13 +246,14 @@ def plot_learning_curve(estimator, X, y, estimator_name=None,
         alpha=0.1, color=cv_color
     )
     ax.plot(train_sizes, train_scores_mean, 'o-', color=train_color,
-             label='Training score')
+            label='Training score')
     ax.plot(train_sizes, test_scores_mean, 'o-', color=cv_color,
-             label='Cross-validation score')
+            label='Cross-validation score')
 
     ax.legend(loc='best')
 
-    estimator_name = type(estimator).__name__ if estimator_name is None else estimator_name
+    if estimator_name is None:
+        estimator_name = type(estimator).__name__
     ax.set_title('Learning Curve for {}'.format(estimator_name))
 
     return ax
@@ -337,8 +340,10 @@ def plot_validation_curve(estimator, X, y, param_name, param_range,
     valid_scores_mean = np.mean(valid_scores, axis=1)
     valid_scores_std = np.std(valid_scores, axis=1)
 
-    estimator_name = type(estimator).__name__ if estimator_name is None else estimator_name
+    if estimator_name is None:
+        estimator_name = type(estimator).__name__
     ax.set_title('Validation Curve for {}'.format(estimator_name))
+
     ax.set_xlabel(param_name)
     ax.set_ylabel('Score')
 
@@ -490,9 +495,9 @@ class GridSearchExplorer:
             Ignored if kind='heatmap'.
 
         annot : bool or rectangular dataset, optional
-            If True, write the data value in each cell. If an array-like with the
-            same shape as ``data``, then use this to annotate the heatmap instead
-            of the raw data.
+            If True, write the data value in each cell. If an array-like
+            with the same shape as ``data``, then use this to annotate
+            the heatmap instead of the raw data.
             Ignored if kind='heatmap'.
 
         fmt : string, default is '.3f'
@@ -670,10 +675,3 @@ class GridSearchExplorer:
         self.plot_data = comparison_data
 
         return fig
-
-if __name__=='__main__':
-    from sklearn.externals import joblib
-
-    grid_ff = joblib.load('./Models/grid_free_form.pkl')
-    gex = GridSearchExplorer(grid_ff)
-    gex.plot(x='max_depth')
