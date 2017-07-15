@@ -1,6 +1,7 @@
 
 # project-specific #
 Data/*
+*.pkl
 
 # others #
 ##########
