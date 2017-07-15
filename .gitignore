@@ -2,6 +2,7 @@
 # project-specific #
 Data/*
 *.pkl
+backups/
 
 # others #
 ##########
